@@ -1,0 +1,14 @@
+{
+    "version": "1.0.0",
+    "created_by": "",
+    "ptero_api": "",
+    "urls": {
+        "url_github": "https://github.com/dilleron3425",
+        "game_server": "http://IP"
+    },
+    "pterodactyl": {
+        "server_uuid": {
+            "name": "uuid"
+        }
+    }
+}
