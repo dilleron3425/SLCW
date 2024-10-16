@@ -48,7 +48,7 @@ class Windows():
             if latest_version != self.current_version:
                 print(f"Доступно обновление: {self.current_version} -> {latest_version}")
                 client_socket.sendall("Ready for update".encode(self.format))
-                save_path = os.path.join(os.path.dirname(__file__), f"WindowsV{latest_version}.py")
+                save_path = os.path.join(os.path.dirname(__file__), f"WindowsV{latest_version}.exe")
                 self.download_update(client_socket, save_path)
                 print(f"Обновление загружено и сохранено по пути: {save_path}")
             else:
