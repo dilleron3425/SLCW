@@ -11,14 +11,14 @@ from pydactyl import PterodactylClient
 
 class SLCW():
     def __init__(self) -> None:
+        self.format = "utf-8"
         with open("config.json", 'r', encoding=self.format) as file:
             self.config = json.load(file)
         self.server = self.config["server_ip"]
         self.port = self.config["server_port"]
         self.header = 4096
-        self.format = "utf-8"
         self.latest_version = "1.0.0"
-        self.update_file_path = "./updates/WindowsV1.0.0.py"
+        self.update_file_path = "./updates/WindowsV1.0.0.exe"
         self.pterodactyl = PterodactylControl(self.config)
 
     def send_file(self, client_socket):
@@ -82,7 +82,8 @@ class SLCW():
         try:
             while connected:
                 if not version_sent:
-                    client_socket.sendall(f"New version: {self.latest_version}".encode(self.format))
+                    file_size = os.path.getsize(self.update_file_path)
+                    client_socket.sendall(f"New version: {self.latest_version} File size: {file_size}".encode(self.format))
                     response = client_socket.recv(self.header).decode(self.format)
                     if response == "Ready for update":
                         self.send_file(client_socket)
@@ -166,6 +167,13 @@ class SLCW():
                 try:
                     client_socket, client_addr = server_socket.accept()
                     print(f"Подключен клиент: {client_addr}")
+                    try:
+                        with open("connections.txt", "a", encoding=self.format) as file:
+                            file.write(f"{client_addr}\n")
+                    except FileNotFoundError:
+                        with open("connections.txt", "w", encoding=self.format) as file:
+                            file.write(f"{client_addr}\n")
+                        print(f'Файл "connections.txt" был создан и запись добавлена.')
                     threading.Thread(target=self.handle_client, args=(client_socket, client_addr)).start()
                     print(f"Кол. активных подключений: {threading.active_count() - 1}")
                 except KeyboardInterrupt:
