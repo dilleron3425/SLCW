@@ -14,7 +14,7 @@ class Windows():
         self.port = port
         self.header = 4096
         self.format = "utf-8"
-        self.current_version = "1.0.0"
+        self.current_version = "1.1.0"
         self.client_socket = None
         self.client_status = None
         self.heartbeat_thread = False
@@ -30,7 +30,7 @@ class Windows():
                 self.console.print("[#008000]Подключение установлено![/]")
                 self.client_status = 200
                 if self.client_socket and self.client_status == 200:
-                    system("clear")
+                    #system("clear")
                     self.console.print(f"""[#a0a0a0]
  ____    _       ____ __        __
 / ___|  | |     / ___ \ \      / /
