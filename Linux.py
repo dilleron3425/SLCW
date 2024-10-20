@@ -17,8 +17,8 @@ class SLCW():
         self.server = self.config["server_ip"]
         self.port = self.config["server_port"]
         self.header = 4096
-        self.latest_version = "1.0.0"
-        self.update_file_path = "./updates/WindowsV1.0.0.exe"
+        self.latest_version = "1.1.0"
+        self.update_file_path = "./updates/WindowsV1.1.0.exe"
         self.pterodactyl = PterodactylControl(self.config)
 
     def send_file(self, client_socket):
