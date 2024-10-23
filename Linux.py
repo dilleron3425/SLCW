@@ -9,16 +9,16 @@ from typing import Dict, Union, Generator, List
 from requests.exceptions import HTTPError
 from pydactyl import PterodactylClient
 
-class SLCW():
+class Linux():
     def __init__(self) -> None:
-        self.format = "utf-8"
-        with open("config.json", 'r', encoding=self.format) as file:
+        with open("config.json", 'r', encoding="utf-8") as file:
             self.config = json.load(file)
         self.server = self.config["server_ip"]
         self.port = self.config["server_port"]
-        self.header = 4096
-        self.latest_version = "1.1.0"
-        self.update_file_path = "./updates/WindowsV1.1.0.exe"
+        self.header = self.config["header"]
+        self.format = self.config["format"]
+        self.latest_version = self.config["version"]
+        self.update_file_path = self.config["paths"]["update_file"]
         self.pterodactyl = PterodactylControl(self.config)
 
     def send_file(self, client_socket):
@@ -82,8 +82,8 @@ class SLCW():
         try:
             while connected:
                 if not version_sent:
-                    file_size = os.path.getsize(self.update_file_path)
-                    client_socket.sendall(f"New version: {self.latest_version} File size: {file_size}".encode(self.format))
+                    file_size = os.path.getsize(self.update_file_path) / (1024 * 1024)
+                    client_socket.sendall(f"New version: {self.latest_version}; File size: {file_size}".encode(self.format))
                     response = client_socket.recv(self.header).decode(self.format)
                     if response == "Ready for update":
                         self.send_file(client_socket)
@@ -91,7 +91,7 @@ class SLCW():
                     elif response == "Do not need":
                         version_sent = True
                     else:
-                        print("Неправильный ответ от клиента!")
+                        print(f"Неправильный ответ от клиента: {response}")
                 else:
                     try:
                         response = client_socket.recv(self.header).decode(self.format)
@@ -166,7 +166,7 @@ class SLCW():
             while True:
                 try:
                     client_socket, client_addr = server_socket.accept()
-                    print(f"Подключен клиент: {client_addr}")
+                    print(f"Подключен клиент: {client_addr[0]}:{client_addr[1]}")
                     try:
                         with open("connections.txt", "a", encoding=self.format) as file:
                             file.write(f"{client_addr}\n")
@@ -187,7 +187,7 @@ class SLCW():
 class PterodactylControl():
     def __init__(self, config) -> None:
         self.config = config
-        self.api = PterodactylClient(self.config["urls"]["game_server"], self.config["ptero_api"])
+        self.api = PterodactylClient(self.config["urls"]["game_server"], self.config["pterodactyl"]["ptero_api"])
         self.no_server = {"message": f"Ошибка, не удалось найти сервер. Возможно, проблема в конфигурации сервера или у сервера SLW!", "color": None}
 
     def handle_error(self, server_status: dict, server_name: str, server_error: Exception) -> None:
@@ -375,5 +375,5 @@ class PterodactylControl():
         return server_statuses
 
 if __name__ == "__main__":
-    slw = SLCW()
-    slw.run()
+    linux = Linux()
+    linux.run()

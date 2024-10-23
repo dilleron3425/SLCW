@@ -1,14 +1,19 @@
 {
-    "version": "1.0.0",
+    "version": "1.2.0",
     "created_by": "",
     "server_ip": "0.0.0.0",
     "server_port": "listening port(int) server",
-    "ptero_api": "",
+    "header": 4096,
+    "format": "utf-8",
+    "paths":{
+        "update_file": "./updates/SLCW.exe"
+    },
     "urls": {
         "url_github": "https://github.com/dilleron3425",
         "game_server": "http://IP"
     },
     "pterodactyl": {
+        "ptero_api": "",
         "server_uuid": {
             "name": "uuid"
         }
