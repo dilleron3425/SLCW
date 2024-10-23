@@ -40,29 +40,53 @@ class Linux():
         finally:
             client_socket.close()
 
-    def command_start(self, client_socket, server_name):
-        server_status = self.pterodactyl.server_start(server_name)
-        for status in server_status:
-            server_name, server_info = next(iter(status.items()))
-            client_socket.sendall(f"{server_info['message']}".encode(self.format))
+    def command_start(self, client_socket, client_addr, server_name):
+        try:
+            server_status = self.pterodactyl.server_start(server_name)
+            for status in server_status:
+                server_name, server_info = next(iter(status.items()))
+                client_socket.sendall(f"{server_info['message']}".encode(self.format))
+        except OSError as error:
+            if error.errno == 9:
+                print(f"[{client_addr}] Отключился от SLCW")
+            else:
+                print(f"[{client_addr}] Ошибка: {error}")
     
-    def command_restart(self, client_socket, server_name):
-        server_status = self.pterodactyl.server_restart(server_name)
-        for status in server_status:
-            server_name, server_info = next(iter(status.items()))
-            client_socket.sendall(f"{server_info['message']}".encode(self.format))
+    def command_restart(self, client_socket, client_addr, server_name):
+        try:
+            server_status = self.pterodactyl.server_restart(server_name)
+            for status in server_status:
+                server_name, server_info = next(iter(status.items()))
+                client_socket.sendall(f"{server_info['message']}".encode(self.format))
+        except OSError as error:
+            if error.errno == 9:
+                print(f"[{client_addr}] Отключился от SLCW")
+            else:
+                print(f"[{client_addr}] Ошибка: {error}")
 
-    def command_stop(self, client_socket, server_name):
-        server_status = self.pterodactyl.server_stop(server_name)
-        for status in server_status:
-            server_name, server_info = next(iter(status.items()))
-            client_socket.sendall(f"{server_info['message']}".encode(self.format))
+    def command_stop(self, client_socket, client_addr, server_name):
+        try:
+            server_status = self.pterodactyl.server_stop(server_name)
+            for status in server_status:
+                server_name, server_info = next(iter(status.items()))
+                client_socket.sendall(f"{server_info['message']}".encode(self.format))
+        except OSError as error:
+            if error.errno == 9:
+                print(f"[{client_addr}] Отключился от SLCW")
+            else:
+                print(f"[{client_addr}] Ошибка: {error}")
 
-    def command_stat(self, client_socket, server_name):
-        server_status = self.pterodactyl.server_status(server_name)
-        for status in server_status:
-            server_name, server_info = next(iter(status.items()))
-            client_socket.sendall(f"{server_info['message']}".encode(self.format))
+    def command_stat(self, client_socket, client_addr, server_name):
+        try:
+            server_status = self.pterodactyl.server_status(server_name)
+            for status in server_status:
+                server_name, server_info = next(iter(status.items()))
+                client_socket.sendall(f"{server_info['message']}".encode(self.format))
+        except OSError as error:
+            if error.errno == 9:
+                print(f"[{client_addr}] Отключился от SLCW")
+            else:
+                print(f"[{client_addr}] Ошибка: {error}")
 
     def handle_client(self, client_socket, client_addr):
         connected = True
@@ -137,19 +161,19 @@ class Linux():
                         print("Неверный сервер или его не существует!")
                         return
                     if command == "start":
-                        command_start = threading.Thread(target=self.command_start, args=(client_socket, server_name))
+                        command_start = threading.Thread(target=self.command_start, args=(client_socket, client_addr, server_name))
                         command_start.start()
                     elif command == "restart":
-                        command_restart = threading.Thread(target=self.command_restart, args=(client_socket, server_name))
+                        command_restart = threading.Thread(target=self.command_restart, args=(client_socket, client_addr, server_name))
                         command_restart.start()
                     elif command == "stop":
-                        command_stop = threading.Thread(target=self.command_stop, args=(client_socket, server_name))
+                        command_stop = threading.Thread(target=self.command_stop, args=(client_socket, client_addr, server_name))
                         command_stop.start()
                     elif command == "stat":
                         if server_name == "all":
                             client_socket.sendall(f"Временно не работает!".encode(self.format))
                         else:
-                            command_stat = threading.Thread(target=self.command_stat, args=(client_socket, server_name))
+                            command_stat = threading.Thread(target=self.command_stat, args=(client_socket, client_addr, server_name))
                             command_stat.start()
         except Exception as error:
             print(f"[{client_addr}] ошибка: {error}")
