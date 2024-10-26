@@ -8,109 +8,118 @@ from os import _exit, path, system, remove
 from rich.console import Console
 from shutil import move
 
-class Windows():
-    def __init__(self, server, port) -> None:
+class WindowsClient():
+    def __init__(self, server: str, port: int) -> None:
         self.console = Console()
         self.server = server
         self.port = port
         self.header = 4096
         self.format = "utf-8"
-        self.current_version = "1.2.0"
+        self.current_version = "1.2.1"
         self.client_socket = None
         self.client_status = None
         self.heartbeat_thread = False
         self.running = True
-        self.sys_logo = (f"""[#a0a0a0]
+
+    def print_sys_logo(self) -> str:
+        system("cls")
+        return (f"""[#a0a0a0]
  ____    _       ____ __        __
-/ ___|  | |     / ___ \ \      / /
-\___ \  | |    | |     \ \ /\ / / 
- ___) | | |___ | |___   \ V  V / V{self.current_version} 
-|____/  |_____| \____|   \_/\_/  By:Diller™
+/ ___|  | |     / ___ \\ \\      / /
+\\___ \\  | |    | |     \\ \\ /\\ / / 
+ ___) | | |___ | |___   \\ V  V / V{self.current_version} 
+|____/  |_____| \\____|   \\_/\\_/  By:Diller™
                     [/]""")
 
-    def connect(self)  -> None:
+    def connect(self, time_to_connect: int)  -> None:
         start_time = time()
-        max_time = 10
         while True:
             try:
-                self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.client_socket.connect((self.server, self.port))
-                self.console.print("[#008000]Подключение установлено![/]")
-                self.client_status = 200
-                if self.client_socket and self.client_status == 200:
-                    system("cls")
-                    self.console.print(self.sys_logo)
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as self.client_socket:
+                    self.client_socket.connect((self.server, self.port))
+                    self.client_socket.sendall("SLCW_CLIENT".encode(self.format))
+                    self.client_status = 200
+                    self.console.print(self.print_sys_logo())
                     self.available_update(self.client_socket)
-                    if self.heartbeat_thread is False or self.heartbeat_thread.is_alive() is False:
-                        self.heartbeat_thread = Thread(target=self.heartbeat)
-                        self.heartbeat_thread.start()
-                    self.commands()
-                break
-            except socket.error as error:
-                if time() - start_time > max_time:
-                    self.console.print(f"[bold red][Ошибка][/]Не удалось подключиться к серверу в течение {max_time} секунд")
-                    self.console.print(f"[bold red][Ошибка][/]Ошибка подключения: {error}")
-                    self.client_status = 500
+                    self.start_heartbeat_thread()
                     self.commands()
                     break
-    
+            except OSError as error:
+                if time() - start_time > time_to_connect:
+                    self.handle_connection_error(time_to_connect, error)
+                    break
+
     def available_update(self, client_socket) -> None:
         command = client_socket.recv(self.header).decode(self.format)
         current_executable_path = path.abspath(executable)
-        if command.startswith("New version:"):
+        if not command.startswith("New version:"):
+            return
+        try:
+            parts = command.split(";")
+            latest_version = parts[0].split(": ")[1]
+            new_version_size = float(parts[1].split(": ")[1])
+        except (IndexError, ValueError) as error:
+            self.console.print(f"[bold red][Ошибка][/]Не удаётся получить информацию о новой версии: {error}")
+            return
+        if latest_version == self.current_version:
+            self.handle_latest_version(client_socket, current_executable_path)
+            return
+        self.console.print(f"[blue][Инфо][/]Доступно обновление: [white]{self.current_version}[/] -> [white]{latest_version}[/]")
+        try:
+            current_version_size = int(path.getsize("SLCW.exe")) / (1024 * 1024)
+            diff_version = current_version_size - new_version_size
+            self.console.print(f"[blue][Инфо][/]Размер версий: [white]{current_version_size:.2}[/] МБ -> [white]{new_version_size:.2f}[/] МБ | Разница: [white]{diff_version:.2}[/] МБ")
+            client_socket.sendall("Ready for update".encode(self.format))
+            save_path = path.join(path.abspath(path.dirname(executable)), f"NEW_SLCW.exe")
+            self.download_update(client_socket, save_path)
+            self.replace_executable(save_path, current_executable_path)
+            self.launch_new_app(save_path)
+        except Exception as error:
+            self.console.print(f"[bold red][Ошибка][/]Не удалось скачать обновление: {error}")
+            return
+
+    def handle_latest_version(self, client_socket, current_executable_path: str):
+        application = "SLCW.exe"
+        target_executable_path = path.abspath(application)
+        if current_executable_path != target_executable_path:
             try:
-                parts = command.split(";")
-                latest_version = parts[0].split(": ")[1]
-                new_version_size = float(parts[1].split(": ")[1])
-            except (IndexError, ValueError) as error:
-                self.console.print(f"[bold red][Ошибка][/] Не удаётся получить информацию о новой версии: {error}")
+                remove(target_executable_path)
+                self.console.print(f"[blue][Инфо][/]Старый файл {application} удалён")
+            except Exception as error:
+                if error.errno == 2:
+                    self.console.print(f"[bold red][Ошибка][/]Не удалось найти старый файл [#808080]{application}[/]")
+                else:
+                    self.console.print(f"[bold red][Ошибка][/]Не удалось удалить старый файл {application}: {error}")
+            try:
+                move(current_executable_path, target_executable_path)
+                self.console.print(f"[blue][Инфо][/]Текущий файл переименован в {application}")
+            except Exception as error:
+                self.console.print(f"[bold red][Ошибка][/]Не удалось переименовать текущий файл на {application}: {error}")
+        client_socket.sendall("Do not need".encode(self.format))
+        self.console.print("[blue][Инфо][/]У вас установлена последняя версия")
+        return
+
+    def replace_executable(self, save_path: str, current_executable_path: str):
+        try:
+            move(save_path, current_executable_path)
+            self.console.print(f"[#008000][Готово][/]Обновление загружено и сохранено по пути: [#808080]{save_path}[/]")
+        except Exception as error:
+            self.console.print(f"[bold yellow][Предупреждение][/] Не удалось переместить или переименовать файл: {error}")
+
+    def launch_new_app(self, save_path: str):
+        self.console.print(f"[blue][Инфо][/]Запуск нового приложения...")
+        sleep(2)
+        if path.exists(save_path):
+            try:
+                Popen([save_path])
+                _exit(0)
+            except Exception as error:
+                self.console.print(f"[bold red][Ошибка][/]Не удалось запустить новое приложение: {error}")
                 return
-            if latest_version != self.current_version:
-                try:
-                    self.console.print(f"[blue][Инфо][/]Доступно обновление: [white]{self.current_version}[/] -> [white]{latest_version}[/]")
-                    current_version_size = int(path.getsize("SLCW.exe")) / (1024 * 1024)
-                    diff_version = current_version_size - new_version_size
-                    self.console.print(f"[blue][Инфо][/]Размер версий: [white]{current_version_size:.2}[/] МБ -> [white]{new_version_size:.2f}[/] МБ | Разница: [white]{diff_version:.2}[/] МБ")
-                    client_socket.sendall("Ready for update".encode(self.format))
-                    save_path = path.join(path.abspath(path.dirname(executable)), f"NEW_SLCW.exe")
-                    self.download_update(client_socket, save_path)
-                    try:
-                        move(save_path, current_executable_path)
-                    except Exception as error:
-                        self.console.print(f"[bold yellow][Предупреждение][/] Не удалось переместить или переименовать файл: {error}")
-                    self.console.print(f"[#008000][Готово][/]Обновление загружено и сохранено по пути: [#808080]{save_path}[/]")
-                    self.console.print(f"[blue][Инфо][/]Запуск нового приложения...")
-                    sleep(2)
-                    if path.exists(save_path):
-                        try:
-                            Popen([save_path])
-                            _exit(0)
-                        except Exception as error:
-                            self.console.print(f"[bold red][Ошибка][/]Не удалось запустить новое приложение: {error}")
-                            return
-                    else:
-                        self.console.print(f"[bold red][Ошибка][/]Файл не найден: {save_path}")
-                        return
-                except Exception as error:
-                    self.console.print(f"[bold red][Ошибка][/]Не удалось скачать обновление: {error}")
-                    return
-            else:
-                target_executable_path = path.abspath("SLCW.exe")
-                if current_executable_path != target_executable_path:
-                    try:
-                        remove(target_executable_path)
-                        self.console.print(f"[blue][Инфо][/]Старый файл SLCW.exe удалён")
-                    except Exception as error:
-                        self.console.print(f"[bold red][Ошибка][/]Не удалось удалить старый файл SLCW.exe: {error}")
-                    try:
-                        move(current_executable_path, target_executable_path)
-                        self.console.print(f"[blue][Инфо][/]Текущий файл переименован в SLCW")
-                    except Exception as error:
-                        self.console.print(f"[bold red][Ошибка][/]Не удалось переименовать текущий файл на SLCW: {error}")
-                        return
-                client_socket.sendall("Do not need".encode(self.format))
-                self.console.print("[blue][Инфо][/]У вас установлена последняя версия")
-    
+        else:
+            self.console.print(f"[bold red][Ошибка][/]Файл не найден: {save_path}")
+            return
+
     def download_update(self, client_socket, save_path) -> None:
         self.console.print("[blue][Инфо][/]Загрузка обновления...")
         try:
@@ -134,6 +143,20 @@ class Windows():
         if self.client_socket:
             self.client_socket.close()
             self.client_socket = None
+
+    def start_heartbeat_thread(self) -> None:
+        if self.heartbeat_thread is False or not self.heartbeat_thread.is_alive():
+            self.heartbeat_thread = Thread(target=self.heartbeat)
+            self.heartbeat_thread.start()
+
+    def handle_connection_error(self, time_to_connect: int, error: OSError) -> None:
+        if error.errno == 111:
+            self.console.print(f"[bold red][Ошибка][/]Не удалось подключиться к серверу в течение {time_to_connect} секунд, возможно, сервер не работает")
+        else:
+            self.console.print(f"[bold red][Ошибка][/]Не удалось подключиться к серверу в течение {time_to_connect} секунд")
+            self.console.print(f"[bold red][Ошибка][/]Ошибка подключения: {error}")
+        self.client_status = 500
+        self.commands()
 
     def heartbeat(self) -> None:
         max_attempts = 3
@@ -170,7 +193,7 @@ class Windows():
                     return
             else:
                 sleep(1)
-  
+
     def commands(self) -> None:
         while self.running:
             if self.client_socket is not None:
@@ -178,7 +201,7 @@ class Windows():
                     command = self.console.input("[blue][Инфо][/]Попробовать снова? [Д/Н]: ").lower()
                     if command in ["д", "да", "y", "yes"]:
                         print("Переподключение...")
-                        self.connect()
+                        self.connect(10)
                     elif command in ["н", "нет", "n", "no", "exit", "quit", "выйти"]:
                         _exit(0)
                     else:
@@ -186,9 +209,7 @@ class Windows():
                 while self.client_status == 200:
                     self.console.print(f"[#a0a0a0]SLCW>[/] ", end="")
                     command = input().lower()
-                    if not command:
-                        continue
-                    elif command == "":
+                    if not command or command == "":
                         continue
                     elif command == "help":
                         self.console.print(f'\n[#a0a0a0]SLCW: первая версия программы клиент-сервер[/]')
@@ -217,8 +238,7 @@ class Windows():
                                 self.client_socket = None
                         _exit(0)
                     elif command in ["clear", "cls"]:
-                        system("cls")
-                        self.console.print(self.sys_logo)
+                        self.console.print(self.print_sys_logo())
                     else:
                         self.client_socket.sendall(command.encode(self.format))
                         self.console.print("[#008000][Готово][/]Команда отправлена")
@@ -228,7 +248,7 @@ class Windows():
             while self.running:
                 if self.client_socket is None and self.client_status is None:
                     print("Подключение...")
-                    self.connect()
+                    self.connect(10)
         except KeyboardInterrupt:
             _exit(0)
         finally:
@@ -237,5 +257,5 @@ class Windows():
             _exit(0)
 
 if __name__ == "__main__":
-    windows = Windows(server=IP, port=PORT)
+    windows = WindowsClient(server=IP, port=PORT)
     windows.run()

@@ -1,12 +1,13 @@
 {
     "version": "1.2.0",
-    "created_by": "",
+    "created_by": "Diller™",
     "server_ip": "0.0.0.0",
     "server_port": "listening port(int) server",
     "header": 4096,
     "format": "utf-8",
     "paths":{
-        "update_file": "./updates/SLCW.exe"
+        "update_file": "./updates/SLCW.exe",
+        "blocked_ips_file": "./blocked_ips.txt"
     },
     "urls": {
         "url_github": "https://github.com/dilleron3425",

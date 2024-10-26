@@ -1,33 +1,44 @@
 import socket
-import threading
-import queue
-from time import sleep
-import json
-import os
 
 from typing import Dict, Union, Generator, List
+from threading import Thread
 from requests.exceptions import HTTPError
 from pydactyl import PterodactylClient
+from os import path
+from queue import Queue
+from time import sleep
+from json import load
 
 class Linux():
     def __init__(self) -> None:
         with open("config.json", 'r', encoding="utf-8") as file:
-            self.config = json.load(file)
+            self.config = load(file)
         self.server = self.config["server_ip"]
         self.port = self.config["server_port"]
         self.header = self.config["header"]
         self.format = self.config["format"]
         self.latest_version = self.config["version"]
         self.update_file_path = self.config["paths"]["update_file"]
+        self.blocked_ips_file = self.config["paths"]["blocked_ips_file"]
         self.pterodactyl = PterodactylControl(self.config)
+
+    def is_ip_blocked(self, ip):
+        if path.exists(self.blocked_ips_file):
+            with open(self.blocked_ips_file, "r") as file:
+                blocked_ips = file.read().splitlines()
+                return ip in blocked_ips
+        return False
+    
+    def block_ip(self, ip):
+        with open(self.blocked_ips_file, "a") as file:
+            file.write(ip + "\n")
+        print(f"IP {ip} был заблокирован.")
+
 
     def send_file(self, client_socket):
         try:
             with open(self.update_file_path, 'rb') as f:
-                while True:
-                    bytes_read = f.read(self.header)
-                    if not bytes_read:
-                        break
+                while (bytes_read := f.read(self.header)):
                     client_socket.sendall(bytes_read)
             sleep(1)
             client_socket.sendall(b"END_OF_FILE")
@@ -35,63 +46,13 @@ class Linux():
             if confirmation == "Download complete":
                 print("Клиент подтвердил завершение загрузки.")
                 client_socket.sendall("Transfer complete".encode(self.format))
-        except Exception as e:
-            print(f"Ошибка при отправке файла: {e}")
-        finally:
-            client_socket.close()
-
-    def command_start(self, client_socket, client_addr, server_name):
-        try:
-            server_status = self.pterodactyl.server_start(server_name)
-            for status in server_status:
-                server_name, server_info = next(iter(status.items()))
-                client_socket.sendall(f"{server_info['message']}".encode(self.format))
-        except OSError as error:
-            if error.errno == 9:
-                print(f"[{client_addr}] Отключился от SLCW")
-            else:
-                print(f"[{client_addr}] Ошибка: {error}")
-    
-    def command_restart(self, client_socket, client_addr, server_name):
-        try:
-            server_status = self.pterodactyl.server_restart(server_name)
-            for status in server_status:
-                server_name, server_info = next(iter(status.items()))
-                client_socket.sendall(f"{server_info['message']}".encode(self.format))
-        except OSError as error:
-            if error.errno == 9:
-                print(f"[{client_addr}] Отключился от SLCW")
-            else:
-                print(f"[{client_addr}] Ошибка: {error}")
-
-    def command_stop(self, client_socket, client_addr, server_name):
-        try:
-            server_status = self.pterodactyl.server_stop(server_name)
-            for status in server_status:
-                server_name, server_info = next(iter(status.items()))
-                client_socket.sendall(f"{server_info['message']}".encode(self.format))
-        except OSError as error:
-            if error.errno == 9:
-                print(f"[{client_addr}] Отключился от SLCW")
-            else:
-                print(f"[{client_addr}] Ошибка: {error}")
-
-    def command_stat(self, client_socket, client_addr, server_name):
-        try:
-            server_status = self.pterodactyl.server_status(server_name)
-            for status in server_status:
-                server_name, server_info = next(iter(status.items()))
-                client_socket.sendall(f"{server_info['message']}".encode(self.format))
-        except OSError as error:
-            if error.errno == 9:
-                print(f"[{client_addr}] Отключился от SLCW")
-            else:
-                print(f"[{client_addr}] Ошибка: {error}")
+        except Exception as error:
+            print(f"Ошибка при отправке файла: {error}")
 
     def handle_client(self, client_socket, client_addr):
         connected = True
         version_sent = False
-        command_queue = queue.Queue()
+        command_queue = Queue()
 
         def command_worker():
             while True:
@@ -100,13 +61,13 @@ class Linux():
                     break
                 self.handle_command(client_socket, client_addr, command)
                 command_queue.task_done()
-        command_thread = threading.Thread(target=command_worker)
+        command_thread = Thread(target=command_worker)
         command_thread.start()
 
         try:
             while connected:
                 if not version_sent:
-                    file_size = os.path.getsize(self.update_file_path) / (1024 * 1024)
+                    file_size = path.getsize(self.update_file_path) / (1024 * 1024)
                     client_socket.sendall(f"New version: {self.latest_version}; File size: {file_size}".encode(self.format))
                     response = client_socket.recv(self.header).decode(self.format)
                     if response == "Ready for update":
@@ -132,81 +93,99 @@ class Linux():
                         else:
                             print(f"[{client_addr}] socket error: {e}")
                             break
-        except Exception as e:
-            print(f"[{client_addr}] ошибка: {e}")
+        except Exception as error:
+            print(f"[{client_addr}] ошибка: {error}")
         finally:
             command_queue.put(None)
             command_thread.join()
             if client_socket:
                 try:
                     client_socket.close()
-                except Exception as e:
-                    print(f"Ошибка при закрытии сокета {client_addr}: {e}")
+                except Exception as error:
+                    print(f"Ошибка при закрытии сокета {client_addr}: {error}")
 
     def handle_command(self, client_socket, client_addr, command):
+            if not command or command == "exit":
+                return
+            
+            print(f"{client_addr} - {command}")
+            parts = command.split()
+            if len(parts) < 2:
+                client_socket.sendall("Неверный формат команды. Используйте: <команда> <имя_сервера>".encode(self.format))
+                return
+            
+            command, server_name = parts[0], parts[1]
+            if server_name not in self.config['pterodactyl']['server_uuid']:
+                print("Неверный сервер или его не существует!")
+                return
+            
+            command_map = {
+                "start": self.command_start,
+                "restart": self.command_restart,
+                "stop": self.command_stop,
+                "stat": self.command_stat,
+            }
+
+            if command in command_map:
+                Thread(target=command_map[command], args=(client_socket, client_addr, server_name)).start()
+        
+    def command_start(self, client_socket, client_addr, server_name):
+        self.execute_command(client_socket, client_addr, server_name)
+    
+    def command_restart(self, client_socket, client_addr, server_name):
+        self.execute_command(client_socket, client_addr, server_name)
+
+    def command_stop(self, client_socket, client_addr, server_name):
+        self.execute_command(client_socket, client_addr, server_name)
+
+    def command_stat(self, client_socket, client_addr, server_name):
+        self.execute_command(client_socket, client_addr, server_name)
+    
+    def execute_command(self, client_socket, client_addr, server_name):
         try:
-            if not command:
-                return
-            if command == "exit":
-                return
+            server_status = self.pterodactyl.server_status(server_name)
+            for status in server_status:
+                server_name, server_info = next(iter(status.items()))
+                client_socket.sendall(f"{server_info['message']}".encode(self.format))
+        except OSError as error:
+            if error.errno == 9:
+                print(f"[{client_addr}] Отключился от SLCW")
             else:
-                print(f"{client_addr} - {command}")
-                parts = command.split()
-                if len(parts) < 2:
-                    client_socket.sendall("Неверный формат команды. Используйте: <команда> <имя_сервера>".encode(self.format))
-                    return
-                command, server_name = parts[0], parts[1]
-                if command in ["start", "stat", "stop", "restart"]:
-                    if server_name not in self.config['pterodactyl']['server_uuid']:
-                        print("Неверный сервер или его не существует!")
-                        return
-                    if command == "start":
-                        command_start = threading.Thread(target=self.command_start, args=(client_socket, client_addr, server_name))
-                        command_start.start()
-                    elif command == "restart":
-                        command_restart = threading.Thread(target=self.command_restart, args=(client_socket, client_addr, server_name))
-                        command_restart.start()
-                    elif command == "stop":
-                        command_stop = threading.Thread(target=self.command_stop, args=(client_socket, client_addr, server_name))
-                        command_stop.start()
-                    elif command == "stat":
-                        if server_name == "all":
-                            client_socket.sendall(f"Временно не работает!".encode(self.format))
-                        else:
-                            command_stat = threading.Thread(target=self.command_stat, args=(client_socket, client_addr, server_name))
-                            command_stat.start()
-        except Exception as error:
-            print(f"[{client_addr}] ошибка: {error}")
-        finally:
-            pass
+                print(f"[{client_addr}] Ошибка: {error}")
 
     def run(self):
-        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server_socket.bind((self.server, self.port))
-        server_socket.listen()
-        print(f"Сервер работает на {self.server}:{self.port}")
-        try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server_socket.bind((self.server, self.port))
+            server_socket.listen()
+            print(f"Сервер работает на {self.server}:{self.port}")
             while True:
                 try:
                     client_socket, client_addr = server_socket.accept()
+                    client_ip = client_addr[0]
+                    if self.is_ip_blocked(client_ip):
+                        print(f"Подключение отклонено для заблокированного IP: {client_ip}")
+                        client_socket.close()
+                        continue  
                     print(f"Подключен клиент: {client_addr[0]}:{client_addr[1]}")
-                    try:
-                        with open("connections.txt", "a", encoding=self.format) as file:
-                            file.write(f"{client_addr}\n")
-                    except FileNotFoundError:
-                        with open("connections.txt", "w", encoding=self.format) as file:
-                            file.write(f"{client_addr}\n")
-                        print(f'Файл "connections.txt" был создан и запись добавлена.')
-                    threading.Thread(target=self.handle_client, args=(client_socket, client_addr)).start()
-                    print(f"Кол. активных подключений: {threading.active_count() - 1}")
+                    check_client = client_socket.recv(self.header).decode(self.format)
+                    if check_client == "SLCW_CLIENT":
+                        print(f"Клиент {client_ip} прошел проверку.")
+                        Thread(target=self.handle_client, args=(client_socket, client_addr)).start()
+                    else:
+                        print(f"Неправильный клиент: {client_ip}:{client_addr[1]}")
+                        self.block_ip(client_ip)
+                        client_socket.close()
                 except KeyboardInterrupt:
-                    print("SLW остановлен!")
-                    os._exit(0)
-                except Exception as error:
-                    print(f"Ошибка при закрытии сервера: {error}")
-        finally:
-            server_socket.close()
+                    print("Сервер остановлен!")
+                    break
+                except OSError as error:
+                    if error.errno == 32:
+                        print(f"[{error.errno}] [{client_addr}] Преждевременное отключение клиента")
+                    elif error.errno == 104:
+                        print(f"[{error.errno}] [{client_addr}] Разрывает соединение до того, как ответит")
+                    else:
+                        print(f"Ошибка при закрытии сервера: {error}")
 
 class PterodactylControl():
     def __init__(self, config) -> None:
