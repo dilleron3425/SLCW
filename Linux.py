@@ -127,23 +127,11 @@ class Linux():
             }
 
             if command in command_map:
-                Thread(target=command_map[command], args=(client_socket, client_addr, server_name)).start()
-        
-    def command_start(self, client_socket, client_addr, server_name):
-        self.execute_command(client_socket, client_addr, server_name)
-    
-    def command_restart(self, client_socket, client_addr, server_name):
-        self.execute_command(client_socket, client_addr, server_name)
+                Thread(target=self.execute_command, args=(command_map[command], client_socket, client_addr, server_name)).start()
 
-    def command_stop(self, client_socket, client_addr, server_name):
-        self.execute_command(client_socket, client_addr, server_name)
-
-    def command_stat(self, client_socket, client_addr, server_name):
-        self.execute_command(client_socket, client_addr, server_name)
-    
-    def execute_command(self, client_socket, client_addr, server_name):
+    def execute_command(self, command_func, client_socket, client_addr, server_name):
         try:
-            server_status = self.pterodactyl.server_status(server_name)
+            server_status = command_func(server_name)
             for status in server_status:
                 server_name, server_info = next(iter(status.items()))
                 client_socket.sendall(f"{server_info['message']}".encode(self.format))
@@ -152,6 +140,18 @@ class Linux():
                 print(f"[{client_addr}] Отключился от SLCW")
             else:
                 print(f"[{client_addr}] Ошибка: {error}")
+
+    def command_start(self, server_name):
+        return self.pterodactyl.server_start(server_name)
+    
+    def command_restart(self, server_name):
+        return self.pterodactyl.server_restart(server_name)
+
+    def command_stop(self, server_name):
+        return self.pterodactyl.server_stop(server_name)
+
+    def command_stat(self, server_name):
+        return self.pterodactyl.server_status(server_name)
 
     def run(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
@@ -178,7 +178,7 @@ class Linux():
                         client_socket.close()
                 except KeyboardInterrupt:
                     print("Сервер остановлен!")
-                    break
+                    return
                 except OSError as error:
                     if error.errno == 32:
                         print(f"[{error.errno}] [{client_addr}] Преждевременное отключение клиента")
