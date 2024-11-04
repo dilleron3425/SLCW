@@ -1,26 +1,31 @@
 import socket
 
 from typing import Dict, Union, Generator, List
-from threading import Thread
 from requests.exceptions import HTTPError
 from pydactyl import PterodactylClient
-from os import path
+from time import sleep, strftime
+from rich.console import Console
+from datetime import datetime
+from threading import Thread
+from os import path, _exit
 from queue import Queue
-from time import sleep
 from json import load
 
 class Linux():
     def __init__(self) -> None:
         with open("config.json", 'r', encoding="utf-8") as file:
             self.config = load(file)
+        self.console = Console()
         self.server = self.config["server_ip"]
         self.port = self.config["server_port"]
         self.header = self.config["header"]
         self.format = self.config["format"]
         self.latest_version = self.config["version"]
         self.update_file_path = self.config["paths"]["update_file"]
+        self.icon_file_path = self.config["paths"]["icon_file"]
         self.blocked_ips_file = self.config["paths"]["blocked_ips_file"]
         self.pterodactyl = PterodactylControl(self.config)
+        self.console_current_date = f"[#a0a0a0][{datetime.now().date()} {strftime('%X')}][/] "
 
     def is_ip_blocked(self, ip):
         if path.exists(self.blocked_ips_file):
@@ -32,8 +37,7 @@ class Linux():
     def block_ip(self, ip):
         with open(self.blocked_ips_file, "a") as file:
             file.write(ip + "\n")
-        print(f"IP {ip} был заблокирован.")
-
+        self.console.print(f"{self.console_current_date}IP {ip} был заблокирован")
 
     def send_file(self, client_socket):
         try:
@@ -44,12 +48,33 @@ class Linux():
             client_socket.sendall(b"END_OF_FILE")
             confirmation = client_socket.recv(self.header).decode(self.format)
             if confirmation == "Download complete":
-                print("Клиент подтвердил завершение загрузки.")
+                self.console.print(f"{self.console_current_date}Клиент подтвердил завершение загрузки")
                 client_socket.sendall("Transfer complete".encode(self.format))
         except Exception as error:
-            print(f"Ошибка при отправке файла: {error}")
+            if error == FileNotFoundError:
+                self.console.print(f"{self.console_current_date}Файл не найден")
+                client_socket.sendall("Файл не найден".encode(self.format))
+            self.console.print(f"{self.console_current_date}Ошибка при отправке файла: {error}")
 
-    def handle_client(self, client_socket, client_addr):
+    def send_icon_file(self, client_socket):
+        client_socket.sendall("OK".encode(self.format))
+        try:
+            with open(self.icon_file_path, 'rb') as f:
+                while (bytes_read := f.read(self.header)):
+                    client_socket.sendall(bytes_read)
+            sleep(1)
+            client_socket.sendall(b"END_OF_FILE")
+            confirmation = client_socket.recv(self.header).decode(self.format)
+            if confirmation == "Download icon complete":
+                self.console.print(f"{self.console_current_date}Клиент подтвердил завершение загрузки")
+                client_socket.sendall("Transfer complete".encode(self.format))
+        except Exception as error:
+            if error == FileNotFoundError:
+                self.console.print(f"{self.console_current_date}Файл не найден")
+                client_socket.sendall("Файл не найден".encode(self.format))
+            self.console.print(f"{self.console_current_date}Ошибка при отправке файла: {error}")
+
+    def handle_client(self, client_socket, client_ip):
         connected = True
         version_sent = False
         command_queue = Queue()
@@ -59,7 +84,7 @@ class Linux():
                 command = command_queue.get()
                 if command is None:
                     break
-                self.handle_command(client_socket, client_addr, command)
+                self.handle_command(client_socket, client_ip, command)
                 command_queue.task_done()
         command_thread = Thread(target=command_worker)
         command_thread.start()
@@ -76,25 +101,28 @@ class Linux():
                     elif response == "Do not need":
                         version_sent = True
                     else:
-                        print(f"Неправильный ответ от клиента: {response}")
+                        self.console.print(f"{self.console_current_date}Неправильный ответ от {client_ip}: {response}")
                 else:
                     try:
                         response = client_socket.recv(self.header).decode(self.format)
                         if not response:
-                            print(f"{client_addr} отключился от SLW")
+                            self.console.print(f"{self.console_current_date}[{client_ip}] отключился от SLW")
                             break
                         if response == "heartbeat":
                             client_socket.sendall("ack".encode(self.format))
+                        elif response == "Download icon tray":
+                            self.send_icon_file(client_socket)
                         else:
                             command_queue.put(response)
                     except OSError as e:
-                        if e.errno == 9:
+                        if e.errno in (9, 104):
+                            self.console.print(f"{self.console_current_date}Возможно, клиент {client_ip} отключился от SLW")
                             break
                         else:
-                            print(f"[{client_addr}] socket error: {e}")
+                            self.console.print(f"{self.console_current_date}[{client_ip}] socket error: {e}")
                             break
         except Exception as error:
-            print(f"[{client_addr}] ошибка: {error}")
+            self.console.print(f"{self.console_current_date}[{client_ip}] ошибка: {error}")
         finally:
             command_queue.put(None)
             command_thread.join()
@@ -102,21 +130,22 @@ class Linux():
                 try:
                     client_socket.close()
                 except Exception as error:
-                    print(f"Ошибка при закрытии сокета {client_addr}: {error}")
+                    self.console.print(f"{self.console_current_date}Ошибка при закрытии сокета {client_ip}: {error}")
 
-    def handle_command(self, client_socket, client_addr, command):
+    def handle_command(self, client_socket, client_ip, command):
+            command = command.lower()
             if not command or command == "exit":
                 return
             
-            print(f"{client_addr} - {command}")
+            self.console.print(f"{self.console_current_date}[{client_ip}] {command}")
             parts = command.split()
             if len(parts) < 2:
-                client_socket.sendall("Неверный формат команды. Используйте: <команда> <имя_сервера>".encode(self.format))
+                client_socket.sendall("Неверный формат команды. Посмотрите список команд введя - help".encode(self.format))
                 return
             
             command, server_name = parts[0], parts[1]
             if server_name not in self.config['pterodactyl']['server_uuid']:
-                print("Неверный сервер или его не существует!")
+                client_socket.sendall("Неверный сервер или его не существует!".encode(self.format))
                 return
             
             command_map = {
@@ -124,12 +153,13 @@ class Linux():
                 "restart": self.command_restart,
                 "stop": self.command_stop,
                 "stat": self.command_stat,
+                "status": self.command_stat,
             }
 
             if command in command_map:
-                Thread(target=self.execute_command, args=(command_map[command], client_socket, client_addr, server_name)).start()
+                Thread(target=self.execute_command, args=(command_map[command], client_socket, client_ip, server_name)).start()
 
-    def execute_command(self, command_func, client_socket, client_addr, server_name):
+    def execute_command(self, command_func, client_socket, client_ip, server_name):
         try:
             server_status = command_func(server_name)
             for status in server_status:
@@ -137,9 +167,9 @@ class Linux():
                 client_socket.sendall(f"{server_info['message']}".encode(self.format))
         except OSError as error:
             if error.errno == 9:
-                print(f"[{client_addr}] Отключился от SLCW")
+                self.console.print(f"{self.console_current_date}[{client_ip}] Отключился от SLCW")
             else:
-                print(f"[{client_addr}] Ошибка: {error}")
+                self.console.print(f"{self.console_current_date}[{client_ip}] Ошибка: {error}")
 
     def command_start(self, server_name):
         return self.pterodactyl.server_start(server_name)
@@ -158,34 +188,39 @@ class Linux():
             server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             server_socket.bind((self.server, self.port))
             server_socket.listen()
-            print(f"Сервер работает на {self.server}:{self.port}")
+            self.console.print(f"Сервер работает на {self.server}:{self.port}")
             while True:
                 try:
                     client_socket, client_addr = server_socket.accept()
                     client_ip = client_addr[0]
+                    client_port = client_addr[1]
                     if self.is_ip_blocked(client_ip):
-                        print(f"Подключение отклонено для заблокированного IP: {client_ip}")
+                        self.console.print(f"{self.console_current_date}Подключение отклонено для заблокированного IP: {client_ip}")
                         client_socket.close()
-                        continue  
-                    print(f"Подключен клиент: {client_addr[0]}:{client_addr[1]}")
+                        continue
+                    self.console.print(f"{self.console_current_date}Подключен клиент: {client_ip}:{client_port}")
                     check_client = client_socket.recv(self.header).decode(self.format)
                     if check_client == "SLCW_CLIENT":
-                        print(f"Клиент {client_ip} прошел проверку.")
-                        Thread(target=self.handle_client, args=(client_socket, client_addr)).start()
+                        self.console.print(f"{self.console_current_date}Клиент {client_ip} прошел проверку")
+                        Thread(target=self.handle_client, args=(client_socket, client_ip)).start()
                     else:
-                        print(f"Неправильный клиент: {client_ip}:{client_addr[1]}")
+                        self.console.print(f"{self.console_current_date}Неправильный клиент: {client_ip}:{client_port}")
                         self.block_ip(client_ip)
                         client_socket.close()
                 except KeyboardInterrupt:
-                    print("Сервер остановлен!")
-                    return
+                    print("Сервер остановлен")
+                    _exit(0)
+                except UnicodeDecodeError:
+                    self.console.print(f"{self.console_current_date}Неправильный клиент: {client_ip}:{client_port}")
+                    self.block_ip(client_ip)
+                    client_socket.close()
                 except OSError as error:
                     if error.errno == 32:
-                        print(f"[{error.errno}] [{client_addr}] Преждевременное отключение клиента")
+                        self.console.print(f"{self.console_current_date}[{error.errno}] [{client_ip}] Преждевременное отключение клиента")
                     elif error.errno == 104:
-                        print(f"[{error.errno}] [{client_addr}] Разрывает соединение до того, как ответит")
+                        self.console.print(f"{self.console_current_date}[{error.errno}] [{client_ip}] Разрывает соединение до того, как ответит")
                     else:
-                        print(f"Ошибка при закрытии сервера: {error}")
+                        self.console.print(f"{self.console_current_date}Ошибка при закрытии сервера: {error}")
 
 class PterodactylControl():
     def __init__(self, config) -> None:
