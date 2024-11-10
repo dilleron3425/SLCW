@@ -161,12 +161,12 @@ class Linux():
                             self.download_client_log(client_socket, client_ip)
                         else:
                             command_queue.put(response)
-                    except OSError as e:
-                        if e.errno in (9, 104):
+                    except OSError as error:
+                        if error.errno in (9, 104):
                             self.console.print(f"{self.get_current_time()}[{error.errno}] [{client_ip}] Возможно, отключился от SLW")
                             break
                         else:
-                            self.console.print(f"{self.get_current_time()}[{error.errno}] [{client_ip}] Ошибка сокета: {e}")
+                            self.console.print(f"{self.get_current_time()}[{error.errno}] [{client_ip}] Ошибка сокета: {error}")
                             break
         except UnicodeDecodeError:
             self.console.print(f"{self.get_current_time()}[{client_ip}] Неправильный формат ответа")
