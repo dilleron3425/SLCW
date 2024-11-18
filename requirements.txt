@@ -2,7 +2,6 @@
 py-dactyl==2.0.4
 
 # For python3.12 client-side
-pystray==0.19.5
 psutil==6.1.0
 
 # For both

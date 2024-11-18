@@ -4,10 +4,10 @@ from typing import Dict, Union, Generator, List
 from requests.exceptions import HTTPError
 from pydactyl import PterodactylClient
 from time import sleep, strftime
+from os import path, _exit, makedirs
 from rich.console import Console
 from datetime import datetime
 from threading import Thread
-from os import path, _exit
 from queue import Queue
 from json import load
 
@@ -25,26 +25,54 @@ class Linux():
         self.icon_file_path = self.config["paths"]["icon_file"]
         self.blocked_ips_file = self.config["paths"]["blocked_ips_file"]
         self.pterodactyl = PterodactylControl(self.config)
+        self.blocked_ips = set()
 
     def get_current_time(self) -> str:
         """Возвращает текущее время и дату"""
         return f"[#a0a0a0][{datetime.now().date()} {strftime('%X')}][/] "
 
-    def is_ip_blocked(self, client_ip):
-        """Проверяет IP на блокировку"""
+    def load_blocked_ips(self) -> None:
+        """Загружает заблокированные IP из файла"""
         if path.exists(self.blocked_ips_file):
             with open(self.blocked_ips_file, "r") as file:
-                blocked_ips = file.read().splitlines()
-                return client_ip in blocked_ips
-        return False
-    
-    def block_ip(self, client_ip):
-        """Блокирует IP и записывает в файл"""
+                for line in file:
+                    ip = line.strip()
+                    self.blocked_ips.add(ip)
+
+    def save_blocked_ip(self, client_ip) -> None:
+        """Сохраняет заблокированный IP в файл"""
         with open(self.blocked_ips_file, "a") as file:
-            file.write(client_ip + "\n")
+            file.write(f"{client_ip}\n")
+
+    def is_ip_blocked(self, client_ip) -> bool:
+        """Проверяет IP на блокировку"""
+        return client_ip in self.blocked_ips
+
+    def block_ip(self, client_ip) -> None:
+        """Блокирует IP и записывает в файл"""
+        self.blocked_ips.add(client_ip)
+        self.save_blocked_ip(client_ip)
         self.console.print(f"{self.get_current_time()}[{client_ip}] Был заблокирован")
 
-    def send_file(self, client_socket, client_ip):
+    def checker_dirs(self, attr_path: str = None) -> None:
+        """Проверяет, существуют ли директории"""
+        paths_to_check = []
+        try:
+            if attr_path is not None:
+                paths_to_check.append(path.join(attr_path))
+            paths_to_check.append(path.join("logs"))
+            paths_to_check.append(path.join("updates"))
+            for path_to_check in paths_to_check:
+                if not path.exists(path_to_check):
+                    try:
+                        makedirs(path_to_check, exist_ok=True)
+                    except OSError as error:
+                        self.console.print(f"\n{self.get_current_time()}[bold red][Ошибка][/] Не удалось создать директорию: {path_to_check}")
+                    self.console.print(f"{self.get_current_time()}[blue][Инфо][/] Был создан каталог: {path_to_check}")
+        except OSError as error:
+            self.console.print(f"\n{self.get_current_time()}[bold red][Ошибка][/] Не удалось проверить директорию или файл: {error}")
+
+    def send_file(self, client_socket, client_ip) -> None:
         """Отправляет файл SLCW.exe клиенту"""
         try:
             with open(self.update_file_path, 'rb') as f:
@@ -65,7 +93,7 @@ class Linux():
             else:
                 self.console.print(f"{self.get_current_time()}Ошибка при отправке обновления: {error}")
 
-    def send_icon_file(self, client_socket, client_ip):
+    def send_icon_file(self, client_socket, client_ip) -> None:
         """Отправляет иконку SLCW.ico клиенту"""
         client_socket.sendall("OK".encode(self.format))
         try:
@@ -90,9 +118,9 @@ class Linux():
     def get_log_file_path(self, client_ip) -> str:
         """Возвращает путь к лог файлу"""
         current_date = datetime.now().strftime("%d-%m-%y")
-        return path.join(f"log-file-{client_ip}-{current_date}.txt")
+        return path.join(f"logs/log-file-{client_ip}-{current_date}.txt")
 
-    def download_client_log(self, client_socket, client_ip):
+    def download_client_log(self, client_socket, client_ip) -> None:
         """Получает лог от клиента"""
         save_path = self.get_log_file_path(client_ip)
         try:
@@ -116,7 +144,7 @@ class Linux():
         except Exception as error:
             self.console.print(f"{self.get_current_time()}[{client_ip}] Не удалось сохранить обновление: {error}")
 
-    def handle_client(self, client_socket, client_ip):
+    def handle_client(self, client_socket, client_ip) -> None:
         """Обрабатывает клиента на команды"""
         connected = True
         version_sent = False
@@ -149,7 +177,7 @@ class Linux():
                     try:
                         response = client_socket.recv(self.header).decode(self.format)
                         if not response:
-                            self.console.print(f"{self.get_current_time()}[{client_ip}] Отключился от SLW")
+                            self.console.print(f"{self.get_current_time()}[{client_ip}] Отключился от SLCW")
                             break
                         if response == "heartbeat":
                             client_socket.sendall("ack".encode(self.format))
@@ -163,7 +191,7 @@ class Linux():
                             command_queue.put(response)
                     except OSError as error:
                         if error.errno in (9, 104):
-                            self.console.print(f"{self.get_current_time()}[{error.errno}] [{client_ip}] Возможно, отключился от SLW")
+                            self.console.print(f"{self.get_current_time()}[{error.errno}] [{client_ip}] Возможно, отключился от SLCW")
                             break
                         else:
                             self.console.print(f"{self.get_current_time()}[{error.errno}] [{client_ip}] Ошибка сокета: {error}")
@@ -181,7 +209,7 @@ class Linux():
                 except Exception as error:
                     self.console.print(f"{self.get_current_time()}[{client_ip}] Ошибка при закрытии сокета: {error}")
 
-    def handle_command(self, client_socket, client_ip, command):
+    def handle_command(self, client_socket, client_ip, command) -> None:
         """Обрабатывает команды от клиента"""
         command = command.lower()
         if not command or command == "exit":
@@ -195,7 +223,7 @@ class Linux():
         
         command, server_name = parts[0], parts[1]
         if server_name not in self.config['pterodactyl']['server_uuid']:
-            client_socket.sendall("Неверный сервер или его не существует!".encode(self.format))
+            client_socket.sendall("Неверный сервер или его не существует".encode(self.format))
             return
         
         command_map = {
@@ -209,41 +237,62 @@ class Linux():
         if command in command_map:
             Thread(target=self.execute_command, args=(command_map[command], client_socket, client_ip, server_name)).start()
 
-    def execute_command(self, command_func, client_socket, client_ip, server_name):
+    def execute_command(self, command_func, client_socket, client_ip, server_name) -> None:
         """Вызывает функцию опред. команды от клиента"""
         try:
             server_status = command_func(server_name)
             for status in server_status:
                 server_name, server_info = next(iter(status.items()))
-                client_socket.sendall(f"{server_info['message']}".encode(self.format))
+                message = server_info.get("message")
+                port = server_info.get("port")
+                core_name = server_info.get("core_name")
+                core_version = server_info.get("core_version")
+                response_lines = []
+                if message is not None:
+                    if command_func.__name__ in ["command_start", "command_restart", "command_stop"]:
+                        response_lines.append(message)
+                    else:
+                        response_lines.append(f"        Статус: {message}")
+                        response_lines.append(f"        IP: dillertm.ru")
+                if port is not None:
+                    response_lines.append(f"        Порт: {port}")
+                if core_name is not None:
+                    response_lines.append(f"        Ядро игры: {core_name}")
+                if core_version is not None:
+                    response_lines.append(f"        Версия игры: {core_version}")
+
+                response_message = "\n".join(response_lines)
+                client_socket.sendall(response_message.encode(self.format))
         except OSError as error:
             if error.errno == 9:
                 self.console.print(f"{self.get_current_time()}[{error.errno}] [{client_ip}] Отключился от SLCW")
             else:
                 self.console.print(f"{self.get_current_time()}[{error.errno}] [{client_ip}] Ошибка при вызове команды: {error}")
 
-    def command_start(self, server_name):
+    def command_start(self, server_name) -> Generator[Dict[str, Dict[str, Union[str, None, int]]], None, None]:
         """Возвращает функцию запуск сервера"""
         return self.pterodactyl.server_start(server_name)
     
-    def command_restart(self, server_name):
+    def command_restart(self, server_name) -> Generator[Dict[str, Dict[str, Union[str, None, int]]], None, None]:
         """Возвращает функцию перезапуск сервера"""
         return self.pterodactyl.server_restart(server_name)
 
-    def command_stop(self, server_name):
+    def command_stop(self, server_name) -> Generator[Dict[str, Dict[str, Union[str, None, int]]], None, None]:
         """Возвращает функцию остановку сервера"""
         return self.pterodactyl.server_stop(server_name)
 
-    def command_stat(self, server_name):
+    def command_stat(self, server_name) -> Generator[Dict[str, Dict[str, Union[str, None, int]]], None, None]:
         """Возвращает функцию статус сервера"""
         return self.pterodactyl.server_status(server_name)
 
-    def run(self):
+    def run(self) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
             server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             server_socket.bind((self.server, self.port))
             server_socket.listen()
             self.console.print(f"Сервер работает на {self.server}:{self.port}")
+            self.checker_dirs()
+            self.load_blocked_ips()
             while True:
                 try:
                     client_socket, client_addr = server_socket.accept()
@@ -281,7 +330,7 @@ class PterodactylControl():
     def __init__(self, config) -> None:
         self.config = config
         self.api = PterodactylClient(self.config["urls"]["game_server"], self.config["pterodactyl"]["ptero_api"])
-        self.no_server = {"message": f"Ошибка, не удалось найти сервер. Возможно, проблема в конфигурации сервера или у сервера SLW!", "color": None}
+        self.no_server = {"message": f"Ошибка, не удалось найти сервер. Возможно, проблема в конфигурации сервера или у сервера SLCW!", "color": None}
 
     def handle_error(self, server_status: dict, server_name: str, server_error: Exception) -> None:
         """Обрабатывает ошибки"""
@@ -294,7 +343,7 @@ class PterodactylControl():
             error_code = server_error.response.status_code
             message = error_messages.get(error_code, f"Ошибка {error_code} при извлечении данных из сервера.")
         elif isinstance(server_error, KeyError):
-            message = "Ошибка, не найдена конфигурация для Pterodactyl на сервере или у сервера SLW!"
+            message = "Ошибка, не найдена конфигурация для Pterodactyl на сервере или у сервера SLCW!"
         else:
             message = f"Не известная ошибка: {server_error}"
         server_status[server_name] = {"message": message, "color": None}
