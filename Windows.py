@@ -18,7 +18,7 @@ class WindowsClient():
         self.port = port
         self.header = 4096
         self.format = "utf-8"
-        self.current_version = "1.3.1"
+        self.current_version = "1.3.2"
         self.client_socket = None
         self.client_status = None
         self.heartbeat_thread = None
