@@ -10,15 +10,21 @@ from rich.console import Console
 from datetime import datetime
 from subprocess import Popen
 from shutil import move
+from json import load
 
 class WindowsClient():
-    def __init__(self, server: str, port: int) -> None:
+    def __init__(self) -> None:
+        with open("config.json", 'r', encoding="utf-8") as file:
+            self.config = load(file)
+        self.server = self.config["server_ip"]
+        self.port = self.config["server_port"]
+        self.header = self.config["header"]
+        self.format = self.config["format"]
+        self.current_version = self.config["version"]
+        self.created_by = self.config["created_by"]
+        self.github = self.config["urls"]["github"]
+        self.github_releases = self.config["urls"]["github_releases"]
         self.console = Console()
-        self.server = server
-        self.port = port
-        self.header = 4096
-        self.format = "utf-8"
-        self.current_version = "1.3.2"
         self.client_socket = None
         self.client_status = None
         self.heartbeat_thread = None
@@ -38,7 +44,7 @@ class WindowsClient():
 / ___|  | |     / ___ \\ \\      / /
 \\___ \\  | |    | |     \\ \\ /\\ / / 
  ___) | | |___ | |___   \\ V  V / V{self.current_version} 
-|____/  |_____| \\____|   \\_/\\_/  By:Diller™
+|____/  |_____| \\____|   \\_/\\_/  By:{self.created_by}
                     [/]""")
 
     def handle_message(self, message: str, message_type: str, error: Exception = None) -> None:
@@ -223,7 +229,7 @@ class WindowsClient():
     def open_url(self) -> None:
         """Открывает ссылку на проект в браузере"""
         try:
-            web_open("https://github.com/dilleron3425/SLCW/releases")
+            web_open(self.github_releases)
             self.log_message("[Info] Открыта ссылка на проект в браузере")
         except Exception as error:
             self.handle_error("При открывание ссылки на проект в браузере", error)
@@ -411,8 +417,8 @@ class WindowsClient():
                 elif command == "help":
                     self.console.print(f'\n[#a0a0a0]SLCW: первая версия программы клиент-сервер[/]')
                     self.console.print(f'[#a0a0a0]Версия[/]: {self.current_version}')
-                    self.console.print(f'[#a0a0a0]Разработчик[/]: Diller™')
-                    self.console.print(f'[#a0a0a0]GitHub[/]: https://github.com/dilleron3425\n')
+                    self.console.print(f'[#a0a0a0]Разработчик[/]: {self.created_by}')
+                    self.console.print(f'[#a0a0a0]GitHub[/]: {self.github}\n')
                     self.console.print(f'    --------------------------------------------------------------------')
                     self.console.print(f"    |         Команда       |                  Описание                |\n")
                     self.console.print(f"    | help                  | Вывести список команд                    |")
@@ -423,6 +429,8 @@ class WindowsClient():
                     self.console.print(f"    | status (имя сервера)  | Узнать статус игрового сервера           |")
                     self.console.print(f"    | restart (имя сервера) | Перезапустить игровой сервер             |")
                     self.console.print(f"    --------------------------------------------------------------------\n")
+                elif command == "info":
+                    self.console.print(self.config)
                 elif command in ["exit", "quit"]:
                     self.running = False
                     if self.client_socket:
@@ -495,5 +503,5 @@ class WindowsClient():
             exit()
 
 if __name__ == "__main__":
-    windows = WindowsClient(server=IP, port=PORT)
+    windows = WindowsClient()
     windows.run()

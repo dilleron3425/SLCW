@@ -15,7 +15,6 @@ class Linux():
     def __init__(self) -> None:
         with open("config.json", 'r', encoding="utf-8") as file:
             self.config = load(file)
-        self.console = Console()
         self.server = self.config["server_ip"]
         self.port = self.config["server_port"]
         self.header = self.config["header"]
@@ -24,6 +23,7 @@ class Linux():
         self.update_file_path = self.config["paths"]["update_file"]
         self.icon_file_path = self.config["paths"]["icon_file"]
         self.blocked_ips_file = self.config["paths"]["blocked_ips_file"]
+        self.console = Console()
         self.pterodactyl = PterodactylControl(self.config)
         self.blocked_ips = set()
 
@@ -335,6 +335,7 @@ class PterodactylControl():
     def handle_error(self, server_status: dict, server_name: str, server_error: Exception) -> None:
         """Обрабатывает ошибки"""
         error_messages = {
+            403: "Ошибка 403, нет доступа к игровому серверу, обратитесь к администратору",
             409: "Ошибка 409, не удается обработать запрос из-за конфликта в текущем состоянии сервера.",
             429: "Ошибка 429, слишком много запросов на сервер за единицу времени.",
             500: "Ошибка 500, неисправность конфигурации сервера или запрос был отказан."

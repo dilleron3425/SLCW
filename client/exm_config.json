@@ -1,0 +1,16 @@
+{
+    "version": "1.3.2",
+    "created_by": "Diller™",
+    "server_ip": "connecting ip(str) server",
+    "server_port": "listening port(int) server",
+    "header": 4096,
+    "format": "utf-8",
+    "paths":{
+        "log_dir": "logs",
+        "icon_file": "SLCW.ico"
+    },
+    "urls": {
+        "github": "https://github.com/dilleron3425",
+        "github_releases": "https://github.com/dilleron3425/SLCW/releases"
+    }
+}
