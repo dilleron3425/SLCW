@@ -3,9 +3,9 @@ import socket
 from typing import Dict, Union, Generator, List
 from requests.exceptions import HTTPError
 from pydactyl import PterodactylClient
-from time import sleep, strftime
 from os import path, _exit, makedirs
 from rich.console import Console
+from time import sleep, strftime
 from datetime import datetime
 from threading import Thread
 from queue import Queue
@@ -13,6 +13,7 @@ from json import load
 
 class Linux():
     def __init__(self) -> None:
+        """Инициализация класса Linux"""
         with open("config.json", 'r', encoding="utf-8") as file:
             self.config = load(file)
         self.server = self.config["server_ip"]
@@ -23,8 +24,8 @@ class Linux():
         self.update_file_path = self.config["paths"]["update_file"]
         self.icon_file_path = self.config["paths"]["icon_file"]
         self.blocked_ips_file = self.config["paths"]["blocked_ips_file"]
-        self.console = Console()
         self.pterodactyl = PterodactylControl(self.config)
+        self.console = Console()
         self.blocked_ips = set()
 
     def get_current_time(self) -> str:
@@ -72,13 +73,26 @@ class Linux():
         except OSError as error:
             self.console.print(f"\n{self.get_current_time()}[bold red][Ошибка][/] Не удалось проверить директорию или файл: {error}")
 
+    def checker_files(self, attr_path: str = None) -> None:
+        """Проверяет, существуют ли файлы"""
+        files_to_check = []
+        try:
+            if attr_path is not None:
+                files_to_check.append(path.join(attr_path))
+            files_to_check.append(path.join("updates", "SLCW.exe"))
+            for file_to_check in files_to_check:
+                if not path.exists(file_to_check):
+                    self.console.print(f"{self.get_current_time()}[bold red][Ошибка][/] Не найден файл: {file_to_check}")
+        except OSError as error:
+            self.console.print(f"\n{self.get_current_time()}[bold red][Ошибка][/] Не удалось проверить файл: {error}")
+
     def send_file(self, client_socket, client_ip) -> None:
         """Отправляет файл SLCW.exe клиенту"""
         try:
             with open(self.update_file_path, 'rb') as f:
                 while (bytes_read := f.read(self.header)):
                     client_socket.sendall(bytes_read)
-            sleep(1)
+            sleep(.1)
             client_socket.sendall(b"END_OF_FILE")
             confirmation = client_socket.recv(self.header).decode(self.format)
             if confirmation == "Download complete":
@@ -86,12 +100,14 @@ class Linux():
                 client_socket.sendall("Transfer complete".encode(self.format))
             else:
                 self.console.print(f"{self.get_current_time()}[{client_ip}] Не подтвердил завершение загрузки обновления")
-        except Exception as error:
+        except OSError as error:
             if error == FileNotFoundError:
                 self.console.print(f"{self.get_current_time()}Файл SLCW.exe не найден")
                 client_socket.sendall("Файл не найден".encode(self.format))
+            elif error.errno == 104:
+                self.console.print(f"{self.get_current_time()}[{client_ip}] Отключился при загрузке обновления")
             else:
-                self.console.print(f"{self.get_current_time()}Ошибка при отправке обновления: {error}")
+                self.console.print(f"{self.get_current_time()}[{client_ip}] Ошибка при отправке обновления: {error}")
 
     def send_icon_file(self, client_socket, client_ip) -> None:
         """Отправляет иконку SLCW.ico клиенту"""
@@ -108,17 +124,19 @@ class Linux():
                 client_socket.sendall("Transfer complete".encode(self.format))
             else:
                 self.console.print(f"{self.get_current_time()}[{client_ip}] Не подтвердил завершение загрузки иконки")
-        except Exception as error:
+        except OSError as error:
             if error == FileNotFoundError:
                 self.console.print(f"{self.get_current_time()}Файл SLCW.ico не найден")
                 client_socket.sendall("Файл не найден".encode(self.format))
+            elif error.errno == 104:
+                self.console.print(f"{self.get_current_time()}[{client_ip}] Отключился при загрузке обновления")
             else:
                 self.console.print(f"{self.get_current_time()}Ошибка при отправке иконки: {error}")
 
     def get_log_file_path(self, client_ip) -> str:
         """Возвращает путь к лог файлу"""
         current_date = datetime.now().strftime("%d-%m-%y")
-        return path.join(f"logs/log-file-{client_ip}-{current_date}.txt")
+        return path.join(f"logs/{current_date}-{client_ip}.txt")
 
     def download_client_log(self, client_socket, client_ip) -> None:
         """Получает лог от клиента"""
@@ -198,6 +216,9 @@ class Linux():
                             break
         except UnicodeDecodeError:
             self.console.print(f"{self.get_current_time()}[{client_ip}] Неправильный формат ответа")
+        except FileNotFoundError:
+            self.console.print(f"{self.get_current_time()}[{client_ip}] Файл для обновления SLCW не найден")
+            client_socket.sendall("Файл не найден".encode(self.format))
         except Exception as error:
             self.console.print(f"{self.get_current_time()}[{client_ip}] Ошибка при обработке сокета: {error}")
         finally:
@@ -222,7 +243,8 @@ class Linux():
             return
         
         command, server_name = parts[0], parts[1]
-        if server_name not in self.config['pterodactyl']['server_uuid']:
+        servers_list = self.pterodactyl.get_server_list()
+        if not any(server_name == server_name for server in servers_list):
             client_socket.sendall("Неверный сервер или его не существует".encode(self.format))
             return
         
@@ -292,6 +314,7 @@ class Linux():
             server_socket.listen()
             self.console.print(f"Сервер работает на {self.server}:{self.port}")
             self.checker_dirs()
+            self.checker_files()
             self.load_blocked_ips()
             while True:
                 try:
@@ -308,7 +331,7 @@ class Linux():
                         self.console.print(f"{self.get_current_time()}[{client_ip}] Прошел проверку")
                         Thread(target=self.handle_client, args=(client_socket, client_ip)).start()
                     else:
-                        self.console.print(f"{self.get_current_time()}[{client_ip}:{client_port}] Не прошли проверку")
+                        self.console.print(f"{self.get_current_time()}[{client_ip}:{client_port}] Не прошёл проверку")
                         self.block_ip(client_ip)
                         client_socket.close()
                 except KeyboardInterrupt:
@@ -330,42 +353,48 @@ class PterodactylControl():
     def __init__(self, config) -> None:
         self.config = config
         self.api = PterodactylClient(self.config["urls"]["game_server"], self.config["pterodactyl"]["ptero_api"])
-        self.no_server = {"message": f"Ошибка, не удалось найти сервер. Возможно, проблема в конфигурации сервера или у сервера SLCW!", "color": None}
+        self.no_server = {"message": f"Ошибка, не удалось найти сервер. Возможно, проблема в конфигурации сервера или у сервера SLCW", "color": None}
+        self._cached_server_list = None
 
     def handle_error(self, server_status: dict, server_name: str, server_error: Exception) -> None:
         """Обрабатывает ошибки"""
         error_messages = {
             403: "Ошибка 403, нет доступа к игровому серверу, обратитесь к администратору",
-            409: "Ошибка 409, не удается обработать запрос из-за конфликта в текущем состоянии сервера.",
-            429: "Ошибка 429, слишком много запросов на сервер за единицу времени.",
-            500: "Ошибка 500, неисправность конфигурации сервера или запрос был отказан."
+            404: "Ошибка 404, сервер не найден, возможно, проблема в конфигурации сервера",
+            409: "Ошибка 409, не удается обработать запрос из-за конфликта в текущем состоянии сервера",
+            429: "Ошибка 429, слишком много запросов на сервер за единицу времени",
+            500: "Ошибка 500, неисправность конфигурации сервера или запрос был отказан"
         }
         if isinstance(server_error, HTTPError):
             error_code = server_error.response.status_code
-            message = error_messages.get(error_code, f"Ошибка {error_code} при извлечении данных из сервера.")
+            message = error_messages.get(error_code, f"Ошибка {error_code} при извлечении данных из сервера")
         elif isinstance(server_error, KeyError):
-            message = "Ошибка, не найдена конфигурация для Pterodactyl на сервере или у сервера SLCW!"
+            message = "Ошибка, не найдена конфигурация для Pterodactyl на сервере или у сервера SLCW"
         else:
             message = f"Не известная ошибка: {server_error}"
         server_status[server_name] = {"message": message, "color": None}
     
     def get_server_list(self) -> List[Dict[str, str]]:
         """Возвращает список серверов"""
-        server_list = self.api.client.servers.list_servers()
-        servers = []
-        for inner_list in server_list:
-            for server in inner_list:
-                server_name = server['attributes']['name']
-                server_uuid = server['attributes']['uuid']
-                servers.append({"name": server_name, "uuid": server_uuid})
-        return servers
+        if self._cached_server_list is None:
+            server_list = self.api.client.servers.list_servers()
+            servers = []
+            for inner_list in server_list:
+                for server in inner_list:
+                    server_name = server['attributes']['name']
+                    server_uuid = server['attributes']['uuid']
+                    servers.append({"name": server_name, "uuid": server_uuid})
+            self._cached_server_list = servers
+        return self._cached_server_list
     
     def server_status(self, server_name: str) -> Generator[Dict[str, Dict[str, Union[str, None, int]]], None, None]:
         """Возвращает статус сервера"""
         server_status = {}
         try:
-            server_uuid = self.config['pterodactyl']['server_uuid'].get(server_name)
-            if server_uuid:
+            server_list = self.get_server_list()
+            for server in server_list:
+                server_uuid = next((server['uuid'] for server in server_list if server['name'].lower() == server_name.lower()), None)
+            if server_uuid is not None:
                 try:
                     server_data = self.api.client.servers.get_server_utilization(server_uuid)
                     parameters = self.api.client.servers.get_server(server_uuid)
@@ -415,8 +444,10 @@ class PterodactylControl():
         else:
             port = None
         try:
-            server_uuid = self.config['pterodactyl']['server_uuid'].get(server_name)
-            if server_uuid:
+            server_list = self.get_server_list()
+            for server in server_list:
+                server_uuid = next((server['uuid'] for server in server_list if server['name'].lower() == server_name.lower()), None)
+            if server_uuid is not None:
                 try:
                     if current_state == 'Запущен':
                         server_status[server_name] = {
@@ -455,8 +486,10 @@ class PterodactylControl():
         core_version = server_status[server_name]['core_version']
         port = server_status[server_name]['port']
         try:
-            server_uuid = self.config['pterodactyl']['server_uuid'].get(server_name)
-            if server_uuid:
+            server_list = self.get_server_list()
+            for server in server_list:
+                server_uuid = next((server['uuid'] for server in server_list if server['name'].lower() == server_name.lower()), None)
+            if server_uuid is not None:
                 try:
                     if self.api.client.servers.get_server_utilization(server_uuid)['current_state'] == 'starting':
                         server_status[server_name] = {"message": "Уже перезапускается...", "color": None}
@@ -487,8 +520,10 @@ class PterodactylControl():
         server_status = next(server_status_generator)
         current_state = server_status[server_name]['message']
         try:
-            server_uuid = self.config['pterodactyl']['server_uuid'].get(server_name)
-            if server_uuid:
+            server_list = self.get_server_list()
+            for server in server_list:
+                server_uuid = next((server['uuid'] for server in server_list if server['name'].lower() == server_name.lower()), None)
+            if server_uuid is not None:
                 try:
                     if current_state == 'Остановлен':
                         server_status[server_name] = {"message": "Уже остановлен", "color": None}
