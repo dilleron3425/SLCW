@@ -8,14 +8,14 @@ from sys import executable, exit, argv
 from time import time, sleep, strftime
 from rich.console import Console
 from datetime import datetime
-from subprocess import Popen
 from shutil import move, copy
+from subprocess import Popen
 from json import load, dump
 
 class WindowsClient():
     def __init__(self) -> None:
         """Инициализации класса WindowsClient"""
-        self.config = self.config_loader()
+        self.config = self.config_handler()
         self.server = self.config["server_ip"]
         self.port = self.config["server_port"]
         self.header = self.config["header"]
@@ -35,14 +35,10 @@ class WindowsClient():
         self.time_to_connect = 10
         self._cache_get_log_file_path = None
 
-    def config_loader(self):
-        try:
-            config_path = path.join(path.expanduser("~"), "SLCW", "config.json")
-            with open(config_path, 'r', encoding="utf-8") as file:
-                config = load(file)
-        except FileNotFoundError:
-            config = {
-                "version": "1.3.3",
+    def config_handler(self, update: bool = False) -> dict:
+        config_path = path.join(path.expanduser("~"), "SLCW", "config.json")
+        config = {
+                "version": "1.4.0",
                 "created_by": "Diller™",
                 "server_ip": "connecting ip(str) server",
                 "server_port": "listening port(int) server",
@@ -57,30 +53,44 @@ class WindowsClient():
                     "github_releases": "https://github.com/dilleron3425/SLCW/releases"
                 }
             }
+        def write_config():
+            try:
+                remove(config_path)
+            except FileNotFoundError:
+                pass
+            except Exception as error:
+                print(f"Ошибка при удалении файла конфигурации: {error}")
             try:
                 with open(config_path, 'w', encoding="utf-8") as file:
                     dump(config, file, indent=4)
                     return
-            except PermissionError:
-                print("Отказано в доступе при запуске программы. Пожалуйста, запустите программу от имени администратора.")
             except Exception as error:
-                print(f"Произошла ошибка при создании конфигурационного файла SLCW.json: {error}")
+                print(f"Ошибка при записи файла конфигурации {config_path}: {error}")
+        if update:
+            try:
+                write_config()
+                self.log_message("Конфигурация config.json обновлена")
+            except FileNotFoundError:
+                write_config()
+                self.log_message(f"Создали новый config.json, так как не был найден")
+            except PermissionError:
+                self.handle_error(f"Доступ к файлу {config_path} запрещён, пожалуйста, запустите программу от имени администратора")
+            except Exception as error:
+                self.handle_error(f"Ошибка при загрузке конфигурационного файла config.json", error)
+        try:
+            with open(config_path, 'r', encoding="utf-8") as file:
+                config = load(file)
+        except FileNotFoundError:
+            try:
+                write_config()
+            except PermissionError:
+                print("Отказано в доступе при запуске программы. Пожалуйста, запустите программу от имени администратора")
+            except Exception as error:
+                print(f"Произошла ошибка при создании конфигурационного файла config.json: {error}")
         except Exception as error:
-            print(f"Ошибка при загрузке конфигурационного файла SLCW.json: {error}")
+            print(f"Ошибка при загрузке конфигурационного файла config.json: {error}")
         finally:
             return config
-
-    def print_sys_logo(self) -> str:
-        """Выводит логотип программы в консоль"""
-        self.log_message("[Info] Вывод логотипа")
-        system("cls")
-        return self.console.print(f"""[#a0a0a0]
- ____    _       ____ __        __
-/ ___|  | |     / ___ \\ \\      / /
-\\___ \\  | |    | |     \\ \\ /\\ / / 
- ___) | | |___ | |___   \\ V  V / V{self.current_version} 
-|____/  |_____| \\____|   \\_/\\_/  By:{self.created_by}
-                    [/]""")
 
     def handle_message(self, message: str, message_type: str, error: Exception = None) -> None:
         """Обработка сообщений и вывод их в консоль"""
@@ -130,6 +140,18 @@ class WindowsClient():
         """Обработка ошибок и вывод сообщение в консоль"""
         self.handle_message(message, "error", error)
 
+    def print_sys_logo(self) -> str:
+        """Выводит логотип программы в консоль"""
+        self.log_message("[Info] Вывод логотипа")
+        system("cls")
+        return self.handle_print(f"""[#a0a0a0]
+ ____    _       ____ __        __
+/ ___|  | |     / ___ \\ \\      / /
+\\___ \\  | |    | |     \\ \\ /\\ / / 
+ ___) | | |___ | |___   \\ V  V / V{self.current_version} 
+|____/  |_____| \\____|   \\_/\\_/  By:{self.created_by}
+                    [/]""")
+
     def connect(self)  -> None:
         """Подключает клиента к серверу"""
         start_time = time()
@@ -156,16 +178,6 @@ class WindowsClient():
                     self.commands()
                     return
 
-    def handle_connection_error(self, time_to_connect: int, error: OSError) -> None:
-        """Обрабатывает ошибку соединения"""
-        if error.errno == 111 or 10061: # Не удалось установить соединение
-            self.handle_error(f"Не удалось подключиться к серверу в течение {time_to_connect} секунд, возможно, сервер не работает")
-        else:
-            self.handle_info(f"Не удалось подключиться к серверу в течение {time_to_connect} секунд")
-            self.handle_error("Ошибка подключения", error)
-        self.client_status = 500
-        self.commands()
-
     def available_update(self) -> None:
         """Проверяет доступность обновления"""
         command = self.client_socket.recv(self.header).decode(self.format)
@@ -190,8 +202,9 @@ class WindowsClient():
             self.client_socket.sendall("Ready for update".encode(self.format))
             save_path = path.join(path.abspath(path.dirname(executable)), f"NEW_SLCW.exe")
             if save_path:
-                self.download_update(save_path, new_version_size, latest_version)
+                self.download_handler(save_path, new_version_size, latest_version)
                 self.replace_executable(save_path, current_executable_path)
+                self.config_handler(update=True)
                 self.launch_new_app(save_path)
             else:
                 self.handle_error(f"Не удалось сохранить файл обновления по пути: {save_path}")
@@ -221,7 +234,9 @@ class WindowsClient():
                 move(current_executable_path, target_executable_path)
                 self.handle_info(f"Текущий файл переименован в {application}")
             except OSError as error:
-                if error.winerror == 32: # Файл занят другим процессом
+                if error.winerror == 1920: # Нет доступа
+                    self.handle_error(f"Нет доступа к файлу {current_executable_path}, чтобы переименовать файл")
+                elif error.winerror == 32: # Файл занят другим процессом
                     self.handle_warn(f"Не удалось переименовать текущий файл {current_executable_path}, так как занят другим процессом")
                 elif error.winerror == 2: # Нету файл или папки
                     self.handle_error(f"Не удалось найти текущий файл {current_executable_path}, чтобы переименовать файл")
@@ -306,10 +321,10 @@ class WindowsClient():
 
     def get_log_file_path(self) -> str:
         """Возвращает путь к лог файлу"""
+        self.checker_dirs()
         if self._cache_get_log_file_path is None:
             current_date = datetime.now().strftime("%d-%m-%y")
-            self.checker_dirs()
-            self._cache_get_log_file_path = path.join(path.expanduser("~"), "SLCW\logs", f"log-file-{current_date}.txt")
+            self._cache_get_log_file_path = path.join(path.expanduser("~"), "SLCW\\logs", f"{current_date}.log")
         return self._cache_get_log_file_path
 
     def log_message(self, message: str) -> None:
@@ -326,7 +341,6 @@ class WindowsClient():
         """Отправляет лог файл на сервер"""
         while self.client_socket is None:
             sleep(1)
-            break
         self.client_socket.sendall("LOG_FILE".encode(self.format))
         log_file_path = self.get_log_file_path()
         sleep(1)
@@ -350,36 +364,39 @@ class WindowsClient():
         finally:
             self.start_func_thread(self.heartbeat_thread, self.heartbeat_thread_stop, self.heartbeat)
 
-    def download_update(self, save_path, new_version_size, latest_version) -> None:
-        """Загружает новое обновление"""
-        self.handle_info("Загрузка обновления...")
-        self.open_url()
-        try:
+    def download_handler(self, save_path: str, new_version_size: float = None, latest_version: str = None) -> None:
+        """Обработчик загрузок"""
+        if new_version_size:
+            self.open_url()
             current_version_size = int(path.getsize("SLCW.exe")) / (1024 * 1024)
-            diff_version = new_version_size - current_version_size
-            self.handle_info(f"Размер версий: [white]{current_version_size:.2f}[/] МБ -> [white]{new_version_size:.2f}[/] МБ | Разница: [white]{diff_version:.2f}[/] МБ")
+            diff_versions = new_version_size - current_version_size
+            self.handle_info(f"Размер версий: [white]{current_version_size:.2f}[/] МБ -> [white]{new_version_size:.2f}[/] МБ | Разница: [white]{diff_versions:.2f}[/] МБ")
+        self.handle_info("Загрузка...")
+        try:
             with open(save_path, 'wb') as file:
                 while True:
                     bytes_read = self.client_socket.recv(self.header)
-                    if bytes_read == b"END_OF_FILE":
-                        self.handle_done("Загрузка обновление завершена")
-                        break
+                    if bytes_read == "File not found":
+                        self.handle_server("Сервер не может отправить вам файл, пожалуйста, сообщите администратору")
+                        if latest_version:
+                            self.current_version = latest_version
+                        return
                     if not bytes_read:
                         self.handle_error("Соединение закрыто сервером")
                         break
+                    if bytes_read == b"END_OF_FILE":
+                        self.handle_done("Загрузка завершена")
+                        break
                     file.write(bytes_read)
-                if bytes_read == "Файл не найден":
-                    self.handle_server("Сервер не может отправить вам файл, пожалуйста, сообщите администратору")
-                    self.current_version = latest_version
-                    return
             self.client_socket.sendall("Download complete".encode(self.format))
             server_confirmation = self.client_socket.recv(self.header).decode(self.format)
             if server_confirmation != "Transfer complete":
                 self.handle_warn("Сервер не подтвердил завершение скачивания")
         except Exception as error:
-            self.handle_error("Не удалось сохранить обновление", error)
+            self.handle_error("Не удалось сохранить файл", error)
         finally:
-            self.close_client_socket()
+            if new_version_size:
+                self.close_client_socket()
 
     def start_func_thread(self, func_thread, func_thread_stop, target_func, target_args: tuple = None) -> None:
         """Запускает поток для выполнения функции"""

@@ -8,8 +8,8 @@ from rich.console import Console
 from time import sleep, strftime
 from datetime import datetime
 from threading import Thread
+from json import load, dumps
 from queue import Queue
-from json import load
 
 class Linux():
     def __init__(self) -> None:
@@ -22,7 +22,8 @@ class Linux():
         self.format = self.config["format"]
         self.latest_version = self.config["version"]
         self.update_file_path = self.config["paths"]["update_file"]
-        self.icon_file_path = self.config["paths"]["icon_file"]
+        self.app_icon_file_path = self.config["paths"]["app_icon_file"]
+        self.info_button_icon_path = self.config["paths"]["info_button_icon"]
         self.blocked_ips_file = self.config["paths"]["blocked_ips_file"]
         self.pterodactyl = PterodactylControl(self.config)
         self.console = Console()
@@ -79,7 +80,7 @@ class Linux():
         try:
             if attr_path is not None:
                 files_to_check.append(path.join(attr_path))
-            files_to_check.append(path.join("updates", "SLCW.exe"))
+            files_to_check.append(self.update_file_path)
             for file_to_check in files_to_check:
                 if not path.exists(file_to_check):
                     self.console.print(f"{self.get_current_time()}[bold red][Ошибка][/] Не найден файл: {file_to_check}")
@@ -87,12 +88,12 @@ class Linux():
             self.console.print(f"\n{self.get_current_time()}[bold red][Ошибка][/] Не удалось проверить файл: {error}")
 
     def send_file(self, client_socket, client_ip) -> None:
-        """Отправляет файл SLCW.exe клиенту"""
+        """Отправляет файл GUI SLCW.exe клиенту"""
         try:
             with open(self.update_file_path, 'rb') as f:
                 while (bytes_read := f.read(self.header)):
                     client_socket.sendall(bytes_read)
-            sleep(.1)
+            sleep(1)
             client_socket.sendall(b"END_OF_FILE")
             confirmation = client_socket.recv(self.header).decode(self.format)
             if confirmation == "Download complete":
@@ -103,17 +104,17 @@ class Linux():
         except OSError as error:
             if error == FileNotFoundError:
                 self.console.print(f"{self.get_current_time()}Файл SLCW.exe не найден")
-                client_socket.sendall("Файл не найден".encode(self.format))
+                client_socket.sendall("File not found".encode(self.format))
             elif error.errno == 104:
                 self.console.print(f"{self.get_current_time()}[{client_ip}] Отключился при загрузке обновления")
             else:
                 self.console.print(f"{self.get_current_time()}[{client_ip}] Ошибка при отправке обновления: {error}")
 
-    def send_icon_file(self, client_socket, client_ip) -> None:
+    def send_app_icon_file(self, client_socket, client_ip) -> None:
         """Отправляет иконку SLCW.ico клиенту"""
         client_socket.sendall("OK".encode(self.format))
         try:
-            with open(self.icon_file_path, 'rb') as f:
+            with open(self.app_icon_file_path, 'rb') as f:
                 while (bytes_read := f.read(self.header)):
                     client_socket.sendall(bytes_read)
             sleep(1)
@@ -127,7 +128,31 @@ class Linux():
         except OSError as error:
             if error == FileNotFoundError:
                 self.console.print(f"{self.get_current_time()}Файл SLCW.ico не найден")
-                client_socket.sendall("Файл не найден".encode(self.format))
+                client_socket.sendall("File not found".encode(self.format))
+            elif error.errno == 104:
+                self.console.print(f"{self.get_current_time()}[{client_ip}] Отключился при загрузке обновления")
+            else:
+                self.console.print(f"{self.get_current_time()}Ошибка при отправке иконки: {error}")
+
+    def send_info_button_icon_file(self, client_socket, client_ip) -> None:
+        """Отправляет иконку кнопки информации клиенту"""
+        client_socket.sendall("OK".encode(self.format))
+        try:
+            with open(self.info_button_icon_path, 'rb') as f:
+                while (bytes_read := f.read(self.header)):
+                    client_socket.sendall(bytes_read)
+            sleep(1)
+            client_socket.sendall(b"END_OF_FILE")
+            confirmation = client_socket.recv(self.header).decode(self.format)
+            if confirmation == "Download complete":
+                self.console.print(f"{self.get_current_time()}[{client_ip}] Подтвердил завершение загрузки иконки")
+                client_socket.sendall("Transfer complete".encode(self.format))
+            else:
+                self.console.print(f"{self.get_current_time()}[{client_ip}] Не подтвердил завершение загрузки иконки")
+        except OSError as error:
+            if error == FileNotFoundError:
+                self.console.print(f"{self.get_current_time()}Файл иконки кнопки информации не найден")
+                client_socket.sendall("File not found".encode(self.format))
             elif error.errno == 104:
                 self.console.print(f"{self.get_current_time()}[{client_ip}] Отключился при загрузке обновления")
             else:
@@ -136,7 +161,7 @@ class Linux():
     def get_log_file_path(self, client_ip) -> str:
         """Возвращает путь к лог файлу"""
         current_date = datetime.now().strftime("%d-%m-%y")
-        return path.join(f"logs/{current_date}-{client_ip}.txt")
+        return path.join(f"logs/{current_date}-{client_ip}.log")
 
     def download_client_log(self, client_socket, client_ip) -> None:
         """Получает лог от клиента"""
@@ -201,7 +226,10 @@ class Linux():
                             client_socket.sendall("ack".encode(self.format))
                         elif response == "ICON_TRAY":
                             self.console.print(f"{self.get_current_time()}[{client_ip}] Отправляем иконку трея")
-                            self.send_icon_file(client_socket, client_ip)
+                            self.send_app_icon_file(client_socket, client_ip)
+                        elif response == "INFO_BUTTON":
+                            self.console.print(f"{self.get_current_time()}[{client_ip}] Отправляем иконку кнопки информации")
+                            self.send_info_button_icon_file(client_socket, client_ip)
                         elif response == "LOG_FILE":
                             self.console.print(f"{self.get_current_time()}[{client_ip}] Скачиваем лог файл")
                             self.download_client_log(client_socket, client_ip)
@@ -218,7 +246,7 @@ class Linux():
             self.console.print(f"{self.get_current_time()}[{client_ip}] Неправильный формат ответа")
         except FileNotFoundError:
             self.console.print(f"{self.get_current_time()}[{client_ip}] Файл для обновления SLCW не найден")
-            client_socket.sendall("Файл не найден".encode(self.format))
+            client_socket.sendall("File not found".encode(self.format))
         except Exception as error:
             self.console.print(f"{self.get_current_time()}[{client_ip}] Ошибка при обработке сокета: {error}")
         finally:
@@ -232,10 +260,16 @@ class Linux():
 
     def handle_command(self, client_socket, client_ip, command) -> None:
         """Обрабатывает команды от клиента"""
-        command = command.lower()
-        if not command or command == "exit":
+        if not command or command == "EXIT":
             return
-        
+        elif command == "SERVER_STATUS":
+            self.console.print(f"{self.get_current_time()}[{client_ip}] Клиент запросил статус всех серверов")
+            server_status = self.pterodactyl.stat_all()
+            client_socket.sendall(dumps(server_status).encode(self.format))
+            return
+
+        command = command.lower()
+
         self.console.print(f"{self.get_current_time()}[{client_ip}] {command}")
         parts = command.split()
         if len(parts) < 2:
@@ -303,7 +337,7 @@ class Linux():
         """Возвращает функцию остановку сервера"""
         return self.pterodactyl.server_stop(server_name)
 
-    def command_stat(self, server_name) -> Generator[Dict[str, Dict[str, Union[str, None, int]]], None, None]:
+    def command_stat(self, server_name: str = None) -> Generator[Dict[str, Dict[str, Union[str, None, int]]], None, None]:
         """Возвращает функцию статус сервера"""
         return self.pterodactyl.server_status(server_name)
 
@@ -353,7 +387,7 @@ class PterodactylControl():
     def __init__(self, config) -> None:
         self.config = config
         self.api = PterodactylClient(self.config["urls"]["game_server"], self.config["pterodactyl"]["ptero_api"])
-        self.no_server = {"message": f"Ошибка, не удалось найти сервер. Возможно, проблема в конфигурации сервера или у сервера SLCW", "color": None}
+        self.no_server = {"message": f"Ошибка, не удалось найти сервер. Возможно, проблема в конфигурации сервера или у сервера SLCW"}
         self._cached_server_list = None
 
     def handle_error(self, server_status: dict, server_name: str, server_error: Exception) -> None:
@@ -372,7 +406,7 @@ class PterodactylControl():
             message = "Ошибка, не найдена конфигурация для Pterodactyl на сервере или у сервера SLCW"
         else:
             message = f"Не известная ошибка: {server_error}"
-        server_status[server_name] = {"message": message, "color": None}
+        server_status[server_name] = {"message": message}
     
     def get_server_list(self) -> List[Dict[str, str]]:
         """Возвращает список серверов"""
@@ -413,7 +447,6 @@ class PterodactylControl():
                     port = parameters['relationships']['allocations']['data'][0]['attributes']['port']
                     server_status[server_name] = {
                         "message": 'Запущен' if server_data['current_state'] == 'running' else 'Остановлен',
-                        "color": None if server_data['current_state'] == 'running' else None,
                         "port": port,
                         "core_name": core_name,
                         "core_version": core_version
@@ -452,20 +485,18 @@ class PterodactylControl():
                     if current_state == 'Запущен':
                         server_status[server_name] = {
                         "message": 'Уже запущен',
-                        "color": None,
                         "port": port,
                         "core_name": core_name,
                         "core_version": core_version
                         }
                     else:
                         self.api.client.servers.send_power_action(server_uuid, 'start')
-                        server_status[server_name] = {"message": "Запускается...", "color": None}
+                        server_status[server_name] = {"message": "Запускается..."}
                         yield server_status
                         while self.api.client.servers.get_server_utilization(server_uuid)['current_state'] != 'running':
                             self.api.client.servers.get_server_utilization(server_uuid)['current_state']
                         server_status[server_name] = {
                         "message": 'Запущен',
-                        "color": None,
                         "port": port,
                         "core_name": core_name,
                         "core_version": core_version
@@ -492,16 +523,15 @@ class PterodactylControl():
             if server_uuid is not None:
                 try:
                     if self.api.client.servers.get_server_utilization(server_uuid)['current_state'] == 'starting':
-                        server_status[server_name] = {"message": "Уже перезапускается...", "color": None}
+                        server_status[server_name] = {"message": "Уже перезапускается..."}
                     else:
                         self.api.client.servers.send_power_action(server_uuid, 'restart')
-                        server_status[server_name] = {"message": "Перезапускается...", "color": None}
+                        server_status[server_name] = {"message": "Перезапускается..."}
                         yield server_status
                         while self.api.client.servers.get_server_utilization(server_uuid)['current_state'] != 'running':
                             self.api.client.servers.get_server_utilization(server_uuid)['current_state']
                         server_status[server_name] = {
                         "message": 'Запущен',
-                        "color": None,
                         "port": port,
                         "core_name": core_name,
                         "core_version": core_version
@@ -526,14 +556,14 @@ class PterodactylControl():
             if server_uuid is not None:
                 try:
                     if current_state == 'Остановлен':
-                        server_status[server_name] = {"message": "Уже остановлен", "color": None}
+                        server_status[server_name] = {"message": "Уже остановлен"}
                     else:
                         self.api.client.servers.send_power_action(server_uuid, 'stop')
-                        server_status[server_name] = {"message": "Останавливается...", "color": None}
+                        server_status[server_name] = {"message": "Останавливается..."}
                         yield server_status
                         while self.api.client.servers.get_server_utilization(server_uuid)['current_state'] != 'offline':
                             self.api.client.servers.get_server_utilization(server_uuid)['current_state']
-                        server_status[server_name] = {"message": "Остановлен", "color": None}
+                        server_status[server_name] = {"message": "Остановлен"}
                 except Exception as server_error:
                     self.handle_error(server_status, server_name, server_error)
             else:
@@ -546,15 +576,34 @@ class PterodactylControl():
         """Возвращает статистику всех серверов"""
         server_list = self.get_server_list()
         server_statuses = {}
+        excluded_servers = self.config["pterodactyl"]["excluded_servers"]
         for server in server_list:
             server_name = server['name']
             server_uuid = server['uuid']
+            if server_name in excluded_servers:
+                continue
             try:
-                server_info = self.api.client.servers.get_server_utilization(server_uuid)
+                server_data = self.api.client.servers.get_server_utilization(server_uuid)
+                parameters = self.api.client.servers.get_server(server_uuid)
+                for variable in parameters['relationships']['variables']['data']:
+                    if variable['attributes']['name'] == 'Forge Version':
+                        core_name = parameters['relationships']['variables']['data'][3]['attributes']['name']
+                        core_version = parameters['relationships']['variables']['data'][3]['attributes']['server_value']
+                        break
+                    elif variable['attributes']['name'] =='Server Version':
+                        core_name = parameters['relationships']['variables']['data'][1]['attributes']['name']
+                        core_version = parameters['relationships']['variables']['data'][1]['attributes']['server_value']
+                        break
+                else:
+                    core_name = None
+                    core_version = None
+                port = parameters['relationships']['allocations']['data'][0]['attributes']['port']
                 server_statuses[server_name] = {
-                    "message": 'Запущен' if server_info['current_state'] == 'running' else 'Остановлен',
-                    "color": None if server_info['current_state'] == 'running' else None
-                }  
+                    "message": 'Запущен' if server_data['current_state'] == 'running' else 'Остановлен',
+                    "port": port,
+                    "core_name": core_name,
+                    "core_version": core_version
+                }
             except HTTPError as server_error:
                 self.handle_error(server_statuses, server_name, server_error)
         return server_statuses
