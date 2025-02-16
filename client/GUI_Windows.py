@@ -129,16 +129,20 @@ class GUI(ctk.CTk):
         refresh_button = ctk.CTkButton(center_frame, text="Обновить", corner_radius=10, width=80, height=30, fg_color="#0047AB", hover_color="#0096FF", command=self.refresh_servers)
         refresh_button.grid(row=0, column=2, padx=10, pady=10, sticky="ne")
 
+        kbld12_frame = self.create_button_frame(center_frame, "KBLD12")
+        kbld12_frame.grid(row=1, column=1, padx=20, pady=20, sticky="ew")
+        self.button_frames.append(kbld12_frame)
+
         kbld11_frame = self.create_button_frame(center_frame, "KBLD11")
-        kbld11_frame.grid(row=1, column=1, padx=20, pady=20, sticky="ew")
+        kbld11_frame.grid(row=1, column=2, padx=20, pady=20, sticky="ew")
         self.button_frames.append(kbld11_frame)
 
         kblda_frame = self.create_button_frame(center_frame, "KBLDA")
-        kblda_frame.grid(row=1, column=2, padx=20, pady=20, sticky="ew")
+        kblda_frame.grid(row=2, column=1, padx=20, pady=20, sticky="ew")
         self.button_frames.append(kblda_frame)
 
         dima_leo_frame = self.create_button_frame(center_frame, "Dima-Leo")
-        dima_leo_frame.grid(row=2, column=1, padx=20, pady=20, sticky="ew")
+        dima_leo_frame.grid(row=2, column=2, padx=20, pady=20, sticky="ew")
         self.button_frames.append(dima_leo_frame)
 
         self.buttons_creator()
@@ -752,7 +756,7 @@ class Configure():
                 "CLI_app": "SLCW",
                 "GUI_app": "GUI SLCW"
             },
-            "version": "1.4.0",
+            "version": "1.4.0.1",
             "created_by": "Diller™",
             "server_ip": "connecting ip(str) server",
             "server_port": "listening port(int) server",
